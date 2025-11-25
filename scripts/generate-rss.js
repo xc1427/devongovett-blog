@@ -2,6 +2,10 @@
 /**
  * RSS Feed Generator for Devon's Blog
  * Generates feed.xml from blog post MDX files
+ * 
+ * Note: RSS readers identify unique entries by the <guid> element.
+ * Each post has a stable GUID based on its URL, so rebuilding the feed
+ * will not cause duplicate entries in RSS clients.
  */
 
 const fs = require('fs');
@@ -89,18 +93,29 @@ function main() {
     return extractMetadata(content, file);
   }).filter(post => post.title && post.date);
 
-  const rss = generateRSS(posts);
+  // Deduplicate posts by slug (in case of any file system issues)
+  const seenSlugs = new Set();
+  const uniquePosts = posts.filter(post => {
+    if (seenSlugs.has(post.slug)) {
+      console.warn(`⚠ Skipping duplicate post: ${post.slug}`);
+      return false;
+    }
+    seenSlugs.add(post.slug);
+    return true;
+  });
+
+  const rss = generateRSS(uniquePosts);
   
   // Ensure dist directory exists
   if (!fs.existsSync(distDir)) {
     fs.mkdirSync(distDir, { recursive: true });
   }
   
-  // Write feed.xml
+  // Write feed.xml (overwrites existing file to ensure no stale data)
   const feedPath = path.join(distDir, 'feed.xml');
   fs.writeFileSync(feedPath, rss, 'utf-8');
   
-  console.log(`✓ Generated RSS feed with ${posts.length} posts: ${feedPath}`);
+  console.log(`✓ Generated RSS feed with ${uniquePosts.length} posts: ${feedPath}`);
 }
 
 main();
