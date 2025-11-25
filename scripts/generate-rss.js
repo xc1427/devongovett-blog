@@ -10,6 +10,8 @@
  * This ensures a single source of truth for metadata - Parcel extracts
  * the metadata once, and both the Nav component and RSS feed use it.
  * 
+ * Usage: Run after `parcel build` to generate feed.xml
+ * 
  * Note: RSS readers identify unique entries by the <guid> element.
  * Each post has a stable GUID based on its URL, so rebuilding the feed
  * will not cause duplicate entries in RSS clients.
@@ -24,7 +26,6 @@ const SITE_DESCRIPTION = "Devon Govett's blog about JavaScript, bundlers, and we
 
 const distDir = path.join(__dirname, '../dist');
 const feedDataPath = path.join(distDir, 'feed-data.html');
-const blogDir = path.join(__dirname, '../src/pages/blog');
 
 /**
  * Extract JSON data from the RSC-generated feed-data.html page
@@ -42,49 +43,6 @@ function extractFeedDataFromHtml(html) {
     console.warn('⚠ Failed to parse feed data JSON:', e.message);
     return null;
   }
-}
-
-/**
- * Fallback: Extract metadata directly from MDX files (legacy approach)
- * Used when feed-data.html is not available (e.g., first build)
- */
-function extractMetadataFromMdx(content, filename) {
-  const metadata = {};
-  
-  // Extract exported constants (description, date)
-  const descMatch = content.match(/export\s+const\s+description\s*=\s*(['"`])((?:\\.|(?!\1).)*)\1/s);
-  const dateMatch = content.match(/export\s+const\s+date\s*=\s*(['"`])(.+?)\1/);
-  
-  // Extract title from first H1
-  const titleMatch = content.match(/^#\s+(.+)$/m);
-  
-  if (descMatch) {
-    metadata.description = descMatch[2]
-      .replace(/\\'/g, "'")
-      .replace(/\\"/g, '"')
-      .replace(/\\\\/g, '\\');
-  }
-  if (dateMatch) metadata.date = dateMatch[2];
-  if (titleMatch) metadata.title = titleMatch[1];
-  
-  // Generate URL from filename
-  const slug = filename.replace(/\.mdx$/, '');
-  metadata.url = `/blog/${slug}.html`;
-  metadata.slug = slug;
-  
-  return metadata;
-}
-
-/**
- * Get blog posts from MDX files (fallback method)
- */
-function getPostsFromMdx() {
-  const files = fs.readdirSync(blogDir).filter(f => f.endsWith('.mdx'));
-  
-  return files.map(file => {
-    const content = fs.readFileSync(path.join(blogDir, file), 'utf-8');
-    return extractMetadataFromMdx(content, file);
-  }).filter(post => post.title && post.date);
 }
 
 function escapeXml(str) {
@@ -129,25 +87,18 @@ ${items}
 }
 
 function main() {
-  let posts;
-  let source;
-  
-  // Try to use RSC-generated feed data first (preferred, RSC-native approach)
-  if (fs.existsSync(feedDataPath)) {
-    const html = fs.readFileSync(feedDataPath, 'utf-8');
-    const feedData = extractFeedDataFromHtml(html);
-    
-    if (feedData && Array.isArray(feedData) && feedData.length > 0) {
-      posts = feedData;
-      source = 'RSC feed-data.html';
-    }
+  // Read RSC-generated feed data (built by Parcel from feed-data.tsx)
+  if (!fs.existsSync(feedDataPath)) {
+    console.error('✗ feed-data.html not found. Run "parcel build" first.');
+    process.exit(1);
   }
   
-  // Fallback to parsing MDX files directly (for backwards compatibility)
-  if (!posts) {
-    console.log('ℹ feed-data.html not found or empty, falling back to MDX parsing...');
-    posts = getPostsFromMdx();
-    source = 'MDX files (fallback)';
+  const html = fs.readFileSync(feedDataPath, 'utf-8');
+  const posts = extractFeedDataFromHtml(html);
+  
+  if (!posts || !Array.isArray(posts) || posts.length === 0) {
+    console.error('✗ Failed to extract feed data from feed-data.html');
+    process.exit(1);
   }
 
   // Deduplicate posts by slug
@@ -173,7 +124,7 @@ function main() {
   const feedPath = path.join(distDir, 'feed.xml');
   fs.writeFileSync(feedPath, rss, 'utf-8');
   
-  console.log(`✓ Generated RSS feed with ${uniquePosts.length} posts (source: ${source})`);
+  console.log(`✓ Generated RSS feed with ${uniquePosts.length} posts`);
 }
 
 main();
